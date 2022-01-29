@@ -86,8 +86,8 @@ extern "C" {
  * \include hello_48MHz.c
  */
 
-#define KHZ 1000
-#define MHZ 1000000
+#define PICO_KHZ 1000
+#define PICO_MHZ 1000000
 
 // PICO_CONFIG: PARAM_ASSERTIONS_ENABLED_CLOCKS, Enable/disable assertions in the clocks module, type=bool, default=0, group=hardware_clocks
 #ifndef PARAM_ASSERTIONS_ENABLED_CLOCKS
@@ -146,7 +146,7 @@ void clock_set_reported_hz(enum clock_index clk_index, uint hz);
 
 /// \tag::frequency_count_mhz[]
 static inline float frequency_count_mhz(uint src) {
-    return ((float) (frequency_count_khz(src))) / KHZ;
+    return ((float) (frequency_count_khz(src))) / PICO_KHZ;
 }
 /// \end::frequency_count_mhz[]
 

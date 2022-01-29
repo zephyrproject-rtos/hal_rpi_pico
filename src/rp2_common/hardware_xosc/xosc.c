@@ -17,7 +17,7 @@
 #error XOSC_MHZ must be in the range 1-50
 #endif
 
-#define STARTUP_DELAY (((((XOSC_MHZ * MHZ) / 1000) + 128) / 256) * PICO_XOSC_STARTUP_DELAY_MULTIPLIER)
+#define STARTUP_DELAY (((((XOSC_MHZ * PICO_MHZ) / 1000) + 128) / 256) * PICO_XOSC_STARTUP_DELAY_MULTIPLIER)
 
 // The DELAY field in xosc_hw->startup is 14 bits wide.
 #if STARTUP_DELAY >= (1 << 13)
