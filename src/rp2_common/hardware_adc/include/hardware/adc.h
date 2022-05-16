@@ -130,7 +130,7 @@ static inline void adc_set_temp_sensor_enabled(bool enable) {
  *
  * \return Result of the conversion.
  */
-static inline uint16_t adc_read(void) {
+static inline uint16_t pico_adc_read(void) {
     hw_set_bits(&adc_hw->cs, ADC_CS_START_ONCE_BITS);
 
     while (!(adc_hw->cs & ADC_CS_READY_BITS))
