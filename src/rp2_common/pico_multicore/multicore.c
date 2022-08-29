@@ -133,7 +133,7 @@ void multicore_launch_core1_raw(void (*entry)(void), uint32_t *sp, uint32_t vect
     // Allow for the fact that the caller may have already enabled the FIFO IRQ for their
     // own purposes (expecting FIFO content after core 1 is launched). We must disable
     // the IRQ during the handshake, then restore afterwards.
-    bool enabled = irq_is_enabled(SIO_IRQ_PROC0);
+    bool enabled = pico_irq_is_enabled(SIO_IRQ_PROC0);
     irq_set_enabled(SIO_IRQ_PROC0, false);
 
     // Values to be sent in order over the FIFO from core 0 to core 1
@@ -205,7 +205,7 @@ void multicore_lockout_victim_init() {
 
 static bool multicore_lockout_handshake(uint32_t magic, absolute_time_t until) {
     uint irq_num = SIO_IRQ_PROC0 + get_core_num();
-    bool enabled = irq_is_enabled(irq_num);
+    bool enabled = pico_irq_is_enabled(irq_num);
     if (enabled) irq_set_enabled(irq_num, false);
     bool rc = false;
     do {
