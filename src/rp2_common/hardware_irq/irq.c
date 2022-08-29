@@ -41,7 +41,7 @@ void irq_set_enabled(uint num, bool enabled) {
     irq_set_mask_enabled(1u << num, enabled);
 }
 
-bool irq_is_enabled(uint num) {
+bool pico_irq_is_enabled(uint num) {
     check_irq_param(num);
     return 0 != ((1u << num) & *((io_rw_32 *) (PPB_BASE + M0PLUS_NVIC_ISER_OFFSET)));
 }
@@ -279,7 +279,7 @@ void irq_remove_handler(uint num, irq_handler_t handler) {
 
             // First thing to do is to disable the IRQ in question; that takes care of calls from user code.
             // Note that a irq handler chain is local to our own core, so we don't need to worry about the other core
-            bool was_enabled = irq_is_enabled(num);
+            bool was_enabled = pico_irq_is_enabled(num);
             irq_set_enabled(num, false);
             __dmb();
 
