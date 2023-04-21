@@ -110,7 +110,12 @@ static inline uint harware_alarm_irq_number(uint alarm_num) {
     return TIMER_IRQ_0 + alarm_num;
 }
 
-static void hardware_alarm_irq_handler(void) {
+/**
+ * Modification on the porting to Zephyr:
+ * Add parameter argument to enable referencing user data
+ * Publish as API.
+ */
+void hardware_alarm_irq_handler(void* data) {
     // Determine which timer this IRQ is for
     uint alarm_num = __get_current_exception() - VTABLE_FIRST_IRQ - TIMER_IRQ_0;
     check_hardware_alarm_num_param(alarm_num);
@@ -141,7 +146,7 @@ static void hardware_alarm_irq_handler(void) {
     spin_unlock(lock, save);
 
     if (callback) {
-        callback(alarm_num);
+        callback(alarm_num, data);
     }
 }
 
