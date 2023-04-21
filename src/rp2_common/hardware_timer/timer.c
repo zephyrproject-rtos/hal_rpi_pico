@@ -150,29 +150,23 @@ void hardware_alarm_irq_handler(void* data) {
     }
 }
 
+/**
+ * Modification on the porting to Zephyr:
+ * Don't add irq handler to interrupt vector in this function.
+ */
 void hardware_alarm_set_callback(uint alarm_num, hardware_alarm_callback_t callback) {
     // todo check current core owner
     //  note this should probably be subsumed by irq_set_exclusive_handler anyway, since that
     //  should disallow IRQ handlers on both cores
     check_hardware_alarm_num_param(alarm_num);
-    uint irq_num = harware_alarm_irq_number(alarm_num);
     spin_lock_t *lock = spin_lock_instance(PICO_SPINLOCK_ID_TIMER);
     uint32_t save = spin_lock_blocking(lock);
     if (callback) {
-        if (hardware_alarm_irq_handler != irq_get_vtable_handler(irq_num)) {
-            // note that set_exclusive will silently allow you to set the handler to the same thing
-            // since it is idempotent, which means we don't need to worry about locking ourselves
-            irq_set_exclusive_handler(irq_num, hardware_alarm_irq_handler);
-            irq_set_enabled(irq_num, true);
-            // Enable interrupt in block and at processor
-            hw_set_bits(&timer_hw->inte, 1u << alarm_num);
-        }
+        hw_set_bits(&timer_hw->inte, 1u << alarm_num);
         alarm_callbacks[alarm_num] = callback;
     } else {
         alarm_callbacks[alarm_num] = NULL;
         timer_callbacks_pending &= (uint8_t)~(1u << alarm_num);
-        irq_remove_handler(irq_num, hardware_alarm_irq_handler);
-        irq_set_enabled(irq_num, false);
     }
     spin_unlock(lock, save);
 }
