@@ -121,10 +121,13 @@ static inline bool time_reached(absolute_time_t t) {
 /*! Callback function type for hardware alarms
  *  \ingroup hardware_timer
  *
+ * Modification on the porting to Zephyr:
+ * Add parameter argument to enable referencing user data
+ *
  * \param alarm_num the hardware alarm number
  * \sa hardware_alarm_set_callback()
  */
-typedef void (*hardware_alarm_callback_t)(uint alarm_num);
+typedef void (*hardware_alarm_callback_t)(uint alarm_num, void *data);
 
 /*! \brief cooperatively claim the use of this hardware alarm_num
  *  \ingroup hardware_timer
@@ -214,6 +217,13 @@ void hardware_alarm_cancel(uint alarm_num);
  * @param alarm_num the hardware alarm number
  */
 void hardware_alarm_force_irq(uint alarm_num);
+
+/**
+ * Modification on the porting to Zephyr:
+ * Publish as API.
+ * Add parameter argument to enable referencing user data
+ */
+void hardware_alarm_irq_handler(void *dev);
 #ifdef __cplusplus
 }
 #endif
