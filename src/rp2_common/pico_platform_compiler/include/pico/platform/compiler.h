@@ -70,7 +70,9 @@ static inline uint __builtin_ctz(uint x) {
 #error Unsupported toolchain
 #endif
 
+#ifndef __weak
 #define __weak __attribute__((weak))
+#endif
 
 #include "pico/types.h"
 
