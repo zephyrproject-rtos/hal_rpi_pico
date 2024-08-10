@@ -8,11 +8,9 @@
 #include <string.h>
 #include <stdio.h>
 
-#include "pico/stdlib.h"
 #include "hardware/gpio.h"
 #include "hardware/pio.h"
 #include "hardware/clocks.h"
-#include "hardware/structs/iobank0.h"
 #include "hardware/sync.h"
 #include "hardware/dma.h"
 #include "cyw43_bus_pio_spi.pio.h"
@@ -20,6 +18,7 @@
 #include "cyw43_internal.h"
 #include "cyw43_spi.h"
 #include "cyw43_debug_pins.h"
+#include "pico/cyw43_driver.h"
 
 #if CYW43_SPI_PIO
 #define WL_REG_ON 23
@@ -31,14 +30,30 @@
 #define CS_PIN 25u
 #define IRQ_SAMPLE_DELAY_NS 100
 
-#define SPI_PROGRAM_NAME spi_gap01_sample0
+#ifdef CYW43_SPI_PROGRAM_NAME
+#define SPI_PROGRAM_NAME CYW43_SPI_PROGRAM_NAME
+#else
+//#define SPI_PROGRAM_NAME spi_gap0_sample1 // for lower cpu speed
+#define SPI_PROGRAM_NAME spi_gap01_sample0 // for high cpu speed
+#endif
 #define SPI_PROGRAM_FUNC __CONCAT(SPI_PROGRAM_NAME, _program)
 #define SPI_PROGRAM_GET_DEFAULT_CONFIG_FUNC __CONCAT(SPI_PROGRAM_NAME, _program_get_default_config)
 #define SPI_OFFSET_END __CONCAT(SPI_PROGRAM_NAME, _offset_end)
 #define SPI_OFFSET_LP1_END __CONCAT(SPI_PROGRAM_NAME, _offset_lp1_end)
 
-#define CLOCK_DIV 2
-#define CLOCK_DIV_MINOR 0
+#if !CYW43_PIO_CLOCK_DIV_DYNAMIC
+#define cyw43_pio_clock_div_int CYW43_PIO_CLOCK_DIV_INT
+#define cyw43_pio_clock_div_frac CYW43_PIO_CLOCK_DIV_FRAC
+#else
+static uint16_t cyw43_pio_clock_div_int = CYW43_PIO_CLOCK_DIV_INT;
+static uint8_t cyw43_pio_clock_div_frac = CYW43_PIO_CLOCK_DIV_FRAC;
+
+void cyw43_set_pio_clock_divisor(uint16_t clock_div_int, uint8_t clock_div_frac) {
+    cyw43_pio_clock_div_int = clock_div_int;
+    cyw43_pio_clock_div_frac = clock_div_frac;
+}
+#endif
+
 #define PADS_DRIVE_STRENGTH PADS_BANK0_GPIO0_DRIVE_VALUE_12MA
 
 #if !CYW43_USE_SPI
@@ -65,7 +80,7 @@ static uint32_t counter = 0;
 
 //#define SWAP32(A) ((((A) & 0xff000000U) >> 8) | (((A) & 0xff0000U) << 8) | (((A) & 0xff00U) >> 8) | (((A) & 0xffU) << 8))
 __force_inline static uint32_t __swap16x2(uint32_t a) {
-    __asm ("rev16 %0, %0" : "+l" (a) : : );
+    pico_default_asm ("rev16 %0, %0" : "+l" (a) : : );
     return a;
 }
 #define SWAP32(a) __swap16x2(a)
@@ -90,16 +105,21 @@ int cyw43_spi_init(cyw43_int_t *self) {
     // Only does something if CYW43_LOGIC_DEBUG=1
     logic_debug_init();
 
-    static_assert(NUM_PIOS == 2, "");
+    static_assert(NUM_PIOS == 2 || NUM_PIOS == 3, "");
 
-    pio_hw_t *pios[2] = {pio0, pio1};
+#if NUM_PIOS == 2
+    pio_hw_t *pios[NUM_PIOS] = {pio0, pio1};
+#else
+    pio_hw_t *pios[NUM_PIOS] = {pio0, pio1, pio2};
+#endif
     uint pio_index = CYW43_SPI_PIO_PREFERRED_PIO;
     // Check we can add the program
-    if (!pio_can_add_program(pios[pio_index], &SPI_PROGRAM_FUNC)) {
-        pio_index ^= 1;
-        if (!pio_can_add_program(pios[pio_index], &SPI_PROGRAM_FUNC)) {
+    for(uint i=1; i < NUM_PIOS;i++) {
+        if (pio_can_add_program(pios[pio_index], &SPI_PROGRAM_FUNC)) break;
+        if (i == NUM_PIOS - 1) {
             return CYW43_FAIL_FAST_CHECK(-CYW43_EIO);
         }
+        pio_index = (pio_index + 1 ) % NUM_PIOS;
     }
     assert(!self->bus_data);
     self->bus_data = &bus_data_instance;
@@ -119,12 +139,12 @@ int cyw43_spi_init(cyw43_int_t *self) {
     bus_data->pio_offset = pio_add_program(bus_data->pio, &SPI_PROGRAM_FUNC);
     pio_sm_config config = SPI_PROGRAM_GET_DEFAULT_CONFIG_FUNC(bus_data->pio_offset);
 
-    sm_config_set_clkdiv_int_frac(&config, CLOCK_DIV, CLOCK_DIV_MINOR);
-    hw_write_masked(&padsbank0_hw->io[CLOCK_PIN],
+    sm_config_set_clkdiv_int_frac(&config, cyw43_pio_clock_div_int, cyw43_pio_clock_div_frac);
+    hw_write_masked(&pads_bank0_hw->io[CLOCK_PIN],
                     (uint)PADS_DRIVE_STRENGTH << PADS_BANK0_GPIO0_DRIVE_LSB,
                     PADS_BANK0_GPIO0_DRIVE_BITS
     );
-    hw_write_masked(&padsbank0_hw->io[CLOCK_PIN],
+    hw_write_masked(&pads_bank0_hw->io[CLOCK_PIN],
                     (uint)1 << PADS_BANK0_GPIO0_SLEWFAST_LSB,
                     PADS_BANK0_GPIO0_SLEWFAST_BITS
     );
@@ -165,10 +185,12 @@ void cyw43_spi_deinit(cyw43_int_t *self) {
             pio_sm_unclaim(bus_data->pio, bus_data->pio_sm);
         }
         if (bus_data->dma_out >= 0) {
+            dma_channel_cleanup(bus_data->dma_out);
             dma_channel_unclaim(bus_data->dma_out);
             bus_data->dma_out = -1;
         }
         if (bus_data->dma_in >= 0) {
+            dma_channel_cleanup(bus_data->dma_in);
             dma_channel_unclaim(bus_data->dma_in);
             bus_data->dma_in = -1;
         }
@@ -395,11 +417,12 @@ uint32_t read_reg_u32_swap(cyw43_int_t *self, uint32_t fn, uint32_t reg) {
 
 static inline uint32_t _cyw43_read_reg(cyw43_int_t *self, uint32_t fn, uint32_t reg, uint size) {
     // Padding plus max read size of 32 bits + another 4?
-    static_assert(WHD_BUS_SPI_BACKPLANE_READ_PADD_SIZE % 4 == 0, "");
-    uint32_t buf32[WHD_BUS_SPI_BACKPLANE_READ_PADD_SIZE/4 + 1 + 1];
+    static_assert(CYW43_BACKPLANE_READ_PAD_LEN_BYTES % 4 == 0, "");
+    int index = (CYW43_BACKPLANE_READ_PAD_LEN_BYTES / 4) + 1 + 1;
+    uint32_t buf32[index];
     uint8_t *buf = (uint8_t *)buf32;
-    const uint32_t padding = (fn == BACKPLANE_FUNCTION) ? WHD_BUS_SPI_BACKPLANE_READ_PADD_SIZE : 0; // Add response delay
-    buf32[0] = make_cmd(false, true, fn, reg, size + padding);
+    const uint32_t padding = (fn == BACKPLANE_FUNCTION) ? CYW43_BACKPLANE_READ_PAD_LEN_BYTES : 0; // Add response delay
+    buf32[0] = make_cmd(false, true, fn, reg, size);
 
     if (fn == BACKPLANE_FUNCTION) {
         logic_debug_set(pin_BACKPLANE_READ, 1);
@@ -412,7 +435,7 @@ static inline uint32_t _cyw43_read_reg(cyw43_int_t *self, uint32_t fn, uint32_t 
     if (ret != 0) {
         return ret;
     }
-    uint32_t result = buf32[padding > 0 ? 2 : 1];
+    uint32_t result = buf32[padding > 0 ? index - 1 : 1];
     CYW43_VDEBUG("cyw43_read_reg_u%d %s 0x%lx=0x%lx\n", size * 8, func_name(fn), reg, result);
     return result;
 }
@@ -478,26 +501,26 @@ int cyw43_write_reg_u8(cyw43_int_t *self, uint32_t fn, uint32_t reg, uint32_t va
     return _cyw43_write_reg(self, fn, reg, val, 1);
 }
 
-#if MAX_BLOCK_SIZE > 0x7f8
+#if CYW43_BUS_MAX_BLOCK_SIZE > 0x7f8
 #error Block size is wrong for SPI
 #endif
 
 int cyw43_read_bytes(cyw43_int_t *self, uint32_t fn, uint32_t addr, size_t len, uint8_t *buf) {
-    assert(fn != BACKPLANE_FUNCTION || (len <= 64 && (addr + len) <= 0x8000));
-    const uint32_t padding = (fn == BACKPLANE_FUNCTION) ? 4 : 0; // Add response delay
+    assert(fn != BACKPLANE_FUNCTION || (len <= CYW43_BUS_MAX_BLOCK_SIZE));
+    const uint32_t padding = (fn == BACKPLANE_FUNCTION) ? CYW43_BACKPLANE_READ_PAD_LEN_BYTES : 0; // Add response delay
     size_t aligned_len = (len + 3) & ~3;
     assert(aligned_len > 0 && aligned_len <= 0x7f8);
     assert(buf == self->spid_buf || buf < self->spid_buf || buf >= (self->spid_buf + sizeof(self->spid_buf)));
-    self->spi_header[padding > 0 ? 0 : 1] = make_cmd(false, true, fn, addr, len + padding);
+    self->spi_header[padding > 0 ? 0 : (CYW43_BACKPLANE_READ_PAD_LEN_BYTES / 4)] = make_cmd(false, true, fn, addr, len);
     if (fn == WLAN_FUNCTION) {
         logic_debug_set(pin_WIFI_RX, 1);
     }
-    int ret = cyw43_spi_transfer(self, NULL, 4, (uint8_t *)&self->spi_header[padding > 0 ? 0 : 1], aligned_len + 4 + padding);
+    int ret = cyw43_spi_transfer(self, NULL, 4, (uint8_t *)&self->spi_header[padding > 0 ? 0 : (CYW43_BACKPLANE_READ_PAD_LEN_BYTES / 4)], aligned_len + 4 + padding);
     if (fn == WLAN_FUNCTION) {
         logic_debug_set(pin_WIFI_RX, 0);
     }
     if (ret != 0) {
-        printf("cyw43_read_bytes error %d", ret);
+        CYW43_PRINTF("cyw43_read_bytes error %d", ret);
         return ret;
     }
     if (buf != self->spid_buf) { // avoid a copy in the usual case just to add the header
@@ -510,8 +533,8 @@ int cyw43_read_bytes(cyw43_int_t *self, uint32_t fn, uint32_t addr, size_t len, 
 // Note, uses spid_buf if src isn't using it already
 // Apart from firmware download this appears to only be used for wlan functions?
 int cyw43_write_bytes(cyw43_int_t *self, uint32_t fn, uint32_t addr, size_t len, const uint8_t *src) {
-    assert(fn != BACKPLANE_FUNCTION || (len <= 64 && (addr + len) <= 0x8000));
-    size_t aligned_len = (len + 3) & ~3u;
+    assert(fn != BACKPLANE_FUNCTION || (len <= CYW43_BUS_MAX_BLOCK_SIZE));
+    const size_t aligned_len = (len + 3) & ~3u;
     assert(aligned_len > 0 && aligned_len <= 0x7f8);
     if (fn == WLAN_FUNCTION) {
         // Wait for FIFO to be ready to accept data
@@ -526,22 +549,22 @@ int cyw43_write_bytes(cyw43_int_t *self, uint32_t fn, uint32_t addr, size_t len,
             }
         }
         if (f2_ready_attempts <= 0) {
-            printf("F2 not ready\n");
+            CYW43_PRINTF("F2 not ready\n");
             return CYW43_FAIL_FAST_CHECK(-CYW43_EIO);
         }
     }
     if (src == self->spid_buf) { // avoid a copy in the usual case just to add the header
-        self->spi_header[1] = make_cmd(true, true, fn, addr, len);
+        self->spi_header[(CYW43_BACKPLANE_READ_PAD_LEN_BYTES / 4)] = make_cmd(true, true, fn, addr, len);
         logic_debug_set(pin_WIFI_TX, 1);
-        int res = cyw43_spi_transfer(self, (uint8_t *)&self->spi_header[1], aligned_len + 4, NULL, 0);
+        int res = cyw43_spi_transfer(self, (uint8_t *)&self->spi_header[(CYW43_BACKPLANE_READ_PAD_LEN_BYTES / 4)], aligned_len + 4, NULL, 0);
         logic_debug_set(pin_WIFI_TX, 0);
         return res;
     } else {
         // todo: would be nice to get rid of this. Only used for firmware download?
         assert(src < self->spid_buf || src >= (self->spid_buf + sizeof(self->spid_buf)));
-        self->spi_header[1] = make_cmd(true, true, fn, addr, len);
+        self->spi_header[(CYW43_BACKPLANE_READ_PAD_LEN_BYTES / 4)] = make_cmd(true, true, fn, addr, len);
         memcpy(self->spid_buf, src, len);
-        return cyw43_spi_transfer(self, (uint8_t *)&self->spi_header[1], aligned_len + 4, NULL, 0);
+        return cyw43_spi_transfer(self, (uint8_t *)&self->spi_header[(CYW43_BACKPLANE_READ_PAD_LEN_BYTES / 4)], aligned_len + 4, NULL, 0);
     }
 }
 #endif
