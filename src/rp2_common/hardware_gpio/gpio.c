@@ -192,7 +192,7 @@ void gpio_set_irq_enabled(uint gpio, uint32_t events, bool enabled) {
      * The GPIO irq is managed by Zephyr, so there is no need to check it in the SDK.
      *
     assert(!enabled
-                || (raw_irq_mask[get_core_num()] & (1u<<gpio))
+                || (raw_irq_mask[get_core_num()] & (1ull<<gpio))
                 || callbacks[get_core_num()]);
      */
 

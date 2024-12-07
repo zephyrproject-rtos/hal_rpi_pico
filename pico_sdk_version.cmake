@@ -3,7 +3,7 @@
 set(PICO_SDK_VERSION_MAJOR 2)
 # PICO_BUILD_DEFINE: PICO_SDK_VERSION_MINOR, SDK minor version number, type=int, default=Current SDK minor version, group=pico_base
 # PICO_CMAKE_CONFIG: PICO_SDK_VERSION_MINOR, SDK minor version number, type=int, default=Current SDK minor version, group=pico_base
-set(PICO_SDK_VERSION_MINOR 0)
+set(PICO_SDK_VERSION_MINOR 1)
 # PICO_BUILD_DEFINE: PICO_SDK_VERSION_REVISION, SDK version revision, type=int, default=Current SDK revision, group=pico_base
 # PICO_CMAKE_CONFIG: PICO_SDK_VERSION_REVISION, SDK version revision, type=int, default=Current SDK revision, group=pico_base
 set(PICO_SDK_VERSION_REVISION 0)
