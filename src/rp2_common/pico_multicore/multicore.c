@@ -115,7 +115,7 @@ void multicore_reset_core1(void) {
     // own purposes (expecting FIFO content after core 1 is launched). We must disable
     // the IRQ during the handshake, then restore afterward
     uint irq_num = SIO_FIFO_IRQ_NUM(0);
-    bool enabled = irq_is_enabled(irq_num);
+    bool enabled = pico_irq_is_enabled(irq_num);
     irq_set_enabled(irq_num, false);
 
     // Bring core 1 back out of reset. It will drain its own mailbox FIFO, then push

@@ -295,7 +295,7 @@ static bool timer_callback_issue_1953(repeating_timer_t *rt) {
 }
 
 // Callback should only occur if the alarm is set in the past
-static void alarm_pool_stuck_issue_1953(uint alarm) {
+static void alarm_pool_stuck_issue_1953(uint alarm, void *data) {
     hard_assert(false);
 }
 

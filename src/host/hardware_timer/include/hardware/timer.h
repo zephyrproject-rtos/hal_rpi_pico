@@ -33,7 +33,7 @@ void busy_wait_us(uint64_t delay_us);
 void busy_wait_ms(uint32_t delay_m);
 void busy_wait_until(absolute_time_t t);
 bool time_reached(absolute_time_t t);
-typedef void (*hardware_alarm_callback_t)(uint alarm_num);
+typedef void (*hardware_alarm_callback_t)(uint alarm_num, void *data);
 void hardware_alarm_claim(uint alarm_num);
 void hardware_alarm_unclaim(uint alarm_num);
 int hardware_alarm_claim_unused(bool required);
