@@ -10,9 +10,12 @@ Need to take care to not break these changes when updating pico-sdk.
   - [#7] pico-sdk: hardware_timer: Don't add irq handler to interrupt vector
     - src/rp2_common/hardware_timer/timer.c
   - [#6] pico-sdk: hardware_timer: Add argument to irq handler to handle userdata
+    - src/host/hardware_timer/include/hardware/timer.h
     - src/rp2_common/hardware_timer/include/hardware/timer.h
     - src/rp2_common/hardware_timer/timer.c
+    - test/pico_time_test/pico_time_test.c
   - [#5] pico-sdk: Rename is_irq_enabled() to pico_is_irq_enabled()
+    - src/host/hardware_irq/include/hardware/irq.h
     - src/rp2_common/hardware_irq/include/hardware/irq.h
     - src/rp2_common/hardware_irq/irq.c
     - src/rp2_common/pico_multicore/multicore.c

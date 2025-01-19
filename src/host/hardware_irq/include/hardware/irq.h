@@ -18,7 +18,7 @@
 #define PICO_DISABLE_SHARED_IRQ_HANDLERS 0
 #endif
 
-// PICO_CONFIG: PICO_VTABLE_PER_CORE, user is using separate vector tables per core, type=bool, default=0, group=hardware_irq
+// PICO_CONFIG: PICO_VTABLE_PER_CORE, User is using separate vector tables per core, type=bool, default=0, group=hardware_irq
 #ifndef PICO_VTABLE_PER_CORE
 #define PICO_VTABLE_PER_CORE 0
 #endif
@@ -174,7 +174,7 @@ void irq_set_enabled(uint num, bool enabled);
  * \param num Interrupt number \ref interrupt_nums
  * \return true if the interrupt is enabled
  */
-bool irq_is_enabled(uint num);
+bool pico_irq_is_enabled(uint num);
 
 /*! \brief Enable/disable multiple interrupts on the executing core
  *  \ingroup hardware_irq
