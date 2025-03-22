@@ -48,15 +48,16 @@ static inline void ta_set_timeout(alarm_pool_timer_t *timer, uint alarm_num, int
     // 2. If we just passed the target time, then time_til_target will be high, meaning we will
     //    likely not do the update, but this is OK since the caller who has the full 64 bits
     //    must check if the target time has passed when we return anyway to avoid races.
-    if (time_til_target < time_til_alarm) {
+    // 3. We should never leave here without an alarm being armed
+    if (time_til_target < time_til_alarm || (timer_hw_from_timer(timer)->armed & (1 << alarm_num)) == 0) {
         timer_hw_from_timer(timer)->alarm[alarm_num] = (uint32_t) target;
     }
 }
 
 static inline bool ta_wakes_up_on_or_before(alarm_pool_timer_t *timer, uint alarm_num, int64_t target) {
-    uint32_t current = timer_time_us_32(timer_hw_from_timer(timer));
-    uint32_t time_til_target = (uint32_t) target - current;
-    uint32_t time_til_alarm = timer_hw_from_timer(timer)->alarm[alarm_num] - current;
+    int64_t current = (int64_t)timer_time_us_64(timer_hw_from_timer(timer));
+    int64_t time_til_target = target - current;
+    uint32_t time_til_alarm = timer_hw_from_timer(timer)->alarm[alarm_num] - (uint32_t)current;
     return time_til_alarm <= time_til_target;
 }
 
@@ -75,6 +76,7 @@ static inline void ta_enable_irq_handler(alarm_pool_timer_t *timer, uint alarm_n
 
 static inline void ta_disable_irq_handler(alarm_pool_timer_t *timer, uint alarm_num, irq_handler_t irq_handler) {
     uint irq_num = timer_hardware_alarm_get_irq_num(timer, alarm_num);
+    timer_hw_from_timer(timer)->armed = 1u << alarm_num; // disarm the timer
     hw_clear_bits(&timer_hw_from_timer(timer)->inte, 1u << alarm_num);
     irq_set_enabled(irq_num, true);
     irq_remove_handler(irq_num, irq_handler);

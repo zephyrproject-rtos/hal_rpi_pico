@@ -184,16 +184,13 @@ static void _gpio_set_irq_enabled(uint gpio, uint32_t events, bool enabled, io_b
 }
 
 void gpio_set_irq_enabled(uint gpio, uint32_t events, bool enabled) {
-    // either this call disables the interrupt
-    // or callback should already be set (raw or using gpio_set_irq_callback)
+    // either this call disables the interrupt or callback should already be set.
     // this protects against enabling the interrupt without callback set
     /**
      * Modification on the porting to Zephyr:
      * The GPIO irq is managed by Zephyr, so there is no need to check it in the SDK.
      *
-    assert(!enabled
-                || (raw_irq_mask[get_core_num()] & (1ull<<gpio))
-                || callbacks[get_core_num()]);
+    assert(!enabled || irq_has_handler(IO_IRQ_BANK0));
      */
 
     // Separate mask/force/status per-core, so check which core called, and

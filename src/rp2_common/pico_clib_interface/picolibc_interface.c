@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <machine/time.h>
+#include <time.h>
 #include <sys/time.h>
 #include <sys/times.h>
 
@@ -39,8 +41,9 @@ static int picolibc_putc(char c, __unused FILE *file) {
 static int picolibc_getc(__unused FILE *file) {
 #if LIB_PICO_STDIO
     return stdio_getchar();
-#endif
+#else
     return -1;
+#endif
 }
 
 static int picolibc_flush(__unused FILE *file) {
