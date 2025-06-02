@@ -43,7 +43,8 @@ function(pico_define_boot_stage2 NAME SOURCES)
     if (PICO_C_COMPILER_IS_CLANG)
         target_link_options(${NAME} PRIVATE "-nostdlib")
     elseif (PICO_C_COMPILER_IS_GNU)
-        target_link_options(${NAME} PRIVATE "--specs=nosys.specs")
+        target_compile_options(${NAME} PRIVATE "--specs=picolibc.specs")
+        target_link_options(${NAME} PRIVATE "--specs=picolibc.specs")
         target_link_options(${NAME} PRIVATE "-nostartfiles")
     endif ()
 
@@ -51,7 +52,7 @@ function(pico_define_boot_stage2 NAME SOURCES)
     target_include_directories(${NAME} PRIVATE ${PICO_BOOT_STAGE2_DIR}/asminclude)
 
     target_link_libraries(${NAME} hardware_regs boot_stage2_headers)
-    target_link_options(${NAME} PRIVATE "LINKER:--script=${PICO_BOOT_STAGE2_DIR}/boot_stage2.ld")
+    target_link_options(${NAME} PRIVATE "-T${PICO_BOOT_STAGE2_DIR}/boot_stage2.ld")
     set_target_properties(${NAME} PROPERTIES LINK_DEPENDS ${PICO_BOOT_STAGE2_DIR}/boot_stage2.ld)
 
     pico_add_dis_output(${NAME})

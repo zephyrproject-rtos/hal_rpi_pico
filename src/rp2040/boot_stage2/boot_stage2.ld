@@ -8,7 +8,7 @@ SECTIONS {
     . = ORIGIN(SRAM);
     .text : {
         _start = .; /* make LLVM happy */
-        *(.entry)
-        *(.text)
+        KEEP(*(.entry))
+        KEEP(*(.text .text.*))
     } >SRAM
 }

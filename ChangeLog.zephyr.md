@@ -3,6 +3,13 @@
 Need to take care to not break these changes when updating pico-sdk.
 
 ## Patch List:
+  - [#10] pico-sdk: Switch to picolibc
+    - src/rp2040/boot_stage2/CMakeLists.txt
+    - src/rp2040/boot_stage2/boot_stage2.ld
+    - src/rp2350/boot_stage2/CMakeLists.txt
+    - src/rp2350/boot_stage2/boot_stage2.ld
+    - src/rp2_common/pico_runtime/CMakeLists.txt
+    - src/rp2_common/pico_standard_link/CMakeLists.txt
   - [#9] pico-sdk: Disabling sanity check the IRQ status
     - src/rp2_common/hardware_gpio/gpio.c
   - [#8] pico-sdk: pico_platform_compiler: Do not redefine `__weak`
