@@ -11,12 +11,15 @@
 #include "hardware/sha256.h"
 #include "pico/bootrom/lock.h"
 #include "pico/sha256.h"
+#if !defined(__ZEPHYR__)
 #include "pico/time.h"
+#endif
 
 // We add one 0x80 byte, then 8 bytes for the size
 #define SHA256_PADDING_DATA_BYTES 9
 #define SHA256_BLOCK_SIZE_BYTES 64
 
+#if !defined(__ZEPHYR__)
 bool __weak pico_sha256_lock(pico_sha256_state_t *state) {
     if (!bootrom_try_acquire_lock(BOOTROM_LOCK_SHA_256))
         return false;
@@ -74,8 +77,10 @@ int pico_sha256_start_blocking_until(pico_sha256_state_t *state, enum sha256_end
     } while (true);
     return rc;
 }
+#endif
 
 static void write_to_hardware(pico_sha256_state_t *state, const uint8_t *data, size_t data_size_bytes) {
+#if !defined(__ZEPHYR__)
     if (state->channel >= 0) {
         dma_channel_wait_for_finish_blocking(state->channel);
         assert(!sha256_err_not_ready());
@@ -89,6 +94,7 @@ static void write_to_hardware(pico_sha256_state_t *state, const uint8_t *data, s
             true
         );
     } else {
+#endif
         if (!state->cache_used && !(((uintptr_t)data)&3u)) {
             GCC_Like_Pragma("GCC diagnostic ignored \"-Wcast-align\"")
             const uint32_t *data32 = (const uint32_t *)data;
@@ -109,7 +115,9 @@ static void write_to_hardware(pico_sha256_state_t *state, const uint8_t *data, s
                 sha256_put_word(state->cache.word);
             }
         }
+#if !defined(__ZEPHYR__)
     }
+#endif
 }
 
 static void update_internal(pico_sha256_state_t *state, const uint8_t *data, size_t data_size_bytes) {
@@ -144,12 +152,14 @@ void pico_sha256_update(pico_sha256_state_t *state, const uint8_t *data, size_t 
     update_internal(state, data, data_size_bytes);
 }
 
+#if !defined(__ZEPHYR__)
 void pico_sha256_update_blocking(pico_sha256_state_t *state, const uint8_t *data, size_t data_size_bytes) {
     update_internal(state, data, data_size_bytes);
     if (state->channel >= 0) {
         dma_channel_wait_for_finish_blocking(state->channel);
     }
 }
+#endif
 
 // write the SHA-256 padding to hardware
 static void write_padding(pico_sha256_state_t *state) {
@@ -170,6 +180,7 @@ static void write_padding(pico_sha256_state_t *state) {
     update_internal(state, (uint8_t*)&size, sizeof(uint64_t)); // last write
 }
 
+#if !defined(__ZEPHYR__)
 void pico_sha256_finish(pico_sha256_state_t *state, sha256_result_t *out) {
     assert(state->locked);
     // pass NULL to abandon the current hash in case of an error
@@ -188,4 +199,9 @@ void pico_sha256_finish(pico_sha256_state_t *state, sha256_result_t *out) {
         state->channel  = -1;
     }
     pico_sha256_unlock(state);
+}
+#endif
+
+void pico_sha256_write_padding(pico_sha256_state_t *state) {
+	write_padding(state);
 }
