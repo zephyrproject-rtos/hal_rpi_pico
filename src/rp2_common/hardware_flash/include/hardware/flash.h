@@ -82,6 +82,19 @@ void flash_range_erase(uint32_t flash_offs, size_t count);
 
 void flash_range_program(uint32_t flash_offs, const uint8_t *data, size_t count);
 
+/*! \brief  Write partial flash data
+ *  \ingroup hardware_flash
+ *
+ *  \param flash_offs Flash address of the first byte to be written. Can be any address within a flash page.
+ *  \param data Pointer to the data to write into flash
+ *  \param count Number of bytes to write. Can be less than a full flash page, but must not exceed page size.
+ *
+ *  @note This function allows writing a portion of a flash page.
+ *  If the write crosses a page boundary, behavior is undefined.
+ *  Caller must ensure the range stays within a single flash page.
+ */
+void flash_write_partial(uint32_t flash_offs, const uint8_t *data, size_t count);
+
 /*! \brief Get flash unique 64 bit identifier
  *  \ingroup hardware_flash
  *

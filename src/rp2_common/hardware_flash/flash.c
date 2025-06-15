@@ -7,8 +7,8 @@
 #include "hardware/flash.h"
 #include "pico/bootrom.h"
 
-#if PICO_RP2040
 #include "hardware/structs/io_qspi.h"
+#if PICO_RP2040
 #include "hardware/structs/ssi.h"
 #else
 #include "hardware/structs/qmi.h"
@@ -24,6 +24,8 @@
 #define FLASH_RUID_DATA_BYTES FLASH_UNIQUE_ID_SIZE_BYTES
 #define FLASH_RUID_TOTAL_BYTES (1 + FLASH_RUID_DUMMY_BYTES + FLASH_RUID_DATA_BYTES)
 
+void __no_inline_not_in_flash_func(flash_write_partial_internal)(uint32_t addr, const uint8_t *data, size_t size);
+
 //-----------------------------------------------------------------------------
 // Infrastructure for reentering XIP mode after exiting for programming (take
 // a copy of boot2 before XIP exit). Calling boot2 as a function works because
@@ -32,7 +34,17 @@
 
 #if !PICO_NO_FLASH
 
+#define FLASHCMD_PAGE_PROGRAM 0x02
+#define FLASHCMD_READ_STATUS 0x05
+#define FLASHCMD_WRITE_ENABLE 0x06
 #define BOOT2_SIZE_WORDS 64
+
+enum outover {
+	OUTOVER_NORMAL = 0,
+	OUTOVER_INVERT,
+	OUTOVER_LOW,
+	OUTOVER_HIGH
+};
 
 static uint32_t boot2_copyout[BOOT2_SIZE_WORDS];
 static bool boot2_copyout_valid = false;
@@ -171,6 +183,30 @@ void __no_inline_not_in_flash_func(flash_range_program)(uint32_t flash_offs, con
     connect_internal_flash_func();
     flash_exit_xip_func();
     flash_range_program_func(flash_offs, data, count);
+    flash_flush_cache_func(); // Note this is needed to remove CSn IO force as well as cache flushing
+    flash_enable_xip_via_boot2();
+#if PICO_RP2350
+    flash_rp2350_restore_qmi_cs1(&qmi_save);
+#endif
+}
+
+void __no_inline_not_in_flash_func(flash_write_partial)(uint32_t flash_offs, const uint8_t *data, size_t count) {
+    rom_connect_internal_flash_fn connect_internal_flash_func = (rom_connect_internal_flash_fn)rom_func_lookup_inline(ROM_FUNC_CONNECT_INTERNAL_FLASH);
+    rom_flash_exit_xip_fn flash_exit_xip_func = (rom_flash_exit_xip_fn)rom_func_lookup_inline(ROM_FUNC_FLASH_EXIT_XIP);
+    rom_flash_flush_cache_fn flash_flush_cache_func = (rom_flash_flush_cache_fn)rom_func_lookup_inline(ROM_FUNC_FLASH_FLUSH_CACHE);
+    assert(connect_internal_flash_func && flash_exit_xip_func && flash_flush_cache_func);
+    flash_init_boot2_copyout();
+    xip_cache_clean_all();
+#if PICO_RP2350
+    flash_rp2350_qmi_save_state_t qmi_save;
+    flash_rp2350_save_qmi_cs1(&qmi_save);
+#endif
+
+    __compiler_memory_barrier();
+
+    connect_internal_flash_func();
+    flash_exit_xip_func();
+    flash_write_partial_internal(flash_offs, data, count);
     flash_flush_cache_func(); // Note this is needed to remove CSn IO force as well as cache flushing
     flash_enable_xip_via_boot2();
 #if PICO_RP2350
@@ -370,3 +406,155 @@ void flash_devinfo_set_cs_gpio(uint cs, uint gpio) {
 }
 
 #endif // !PICO_RP2040
+//-----------------------------------------------------------------------------
+/**
+ * Low level flash functions are based on:
+ * github.com/raspberrypi/pico-bootrom-rp2040/blob/master/bootrom/program_flash_generic.c,
+ * github.com/raspberrypi/pico-bootrom-rp2350/blob/master/src/main/arm/varm_generic_flash.c
+ */
+static int __no_inline_not_in_flash_func(flash_was_aborted)()
+{
+	return *(io_rw_32 *)(IO_QSPI_BASE + IO_QSPI_GPIO_QSPI_SD1_CTRL_OFFSET) &
+	       IO_QSPI_GPIO_QSPI_SD1_CTRL_INOVER_BITS;
+}
+
+#if PICO_RP2350
+static uint __no_inline_not_in_flash_func(flash_put_get)(uint cs, const uint8_t *tx, uint8_t *rx, size_t count)
+{
+	/* Assert chip select, and enable direct mode. Anything queued in TX FIFO will start now. */
+	uint32_t csr_toggle_mask = (QMI_DIRECT_CSR_ASSERT_CS0N_BITS << cs) | QMI_DIRECT_CSR_EN_BITS;
+
+	hw_xor_bits(&qmi_hw->direct_csr, csr_toggle_mask);
+
+	size_t tx_count = count;
+	size_t rx_count = count;
+
+	while (tx_count || rx_count) {
+		uint32_t status = qmi_hw->direct_csr;
+
+		if (tx_count && !(status & QMI_DIRECT_CSR_TXFULL_BITS)) {
+			qmi_hw->direct_tx = (uint32_t)(tx ? *tx++ : 0);
+			--tx_count;
+		}
+		if (rx_count && !(status & QMI_DIRECT_CSR_RXEMPTY_BITS)) {
+			uint8_t rxbyte = (uint8_t)qmi_hw->direct_rx;
+
+			if (rx) {
+				*rx++ = rxbyte;
+			}
+			--rx_count;
+		}
+	}
+
+	/* Wait for BUSY as there may be no RX data at all, e.g. for single-byte SPI commands */
+	while (qmi_hw->direct_csr & QMI_DIRECT_CSR_BUSY_BITS) {
+	}
+
+	/* Disable direct-mode interface and deassert chip select */
+	hw_xor_bits(&qmi_hw->direct_csr, csr_toggle_mask);
+	return cs;
+}
+#else
+static void __no_inline_not_in_flash_func(flash_put_get)(const uint8_t *tx, uint8_t *rx, size_t count, size_t rx_skip)
+{
+	const uint max_in_flight = 16 - 2;
+	size_t tx_count = count;
+	size_t rx_count = count;
+	bool did_something;
+	uint32_t tx_level;
+	uint32_t rx_level;
+	uint8_t rxbyte;
+
+	while (tx_count || rx_skip || rx_count) {
+		tx_level = ssi_hw->txflr;
+		rx_level = ssi_hw->rxflr;
+		did_something = false;
+		if (tx_count && tx_level + rx_level < max_in_flight) {
+			ssi_hw->dr0 = (uint32_t)(tx ? *tx++ : 0);
+			--tx_count;
+			did_something = true;
+		}
+		if (rx_level) {
+			rxbyte = ssi_hw->dr0;
+			did_something = true;
+			if (rx_skip) {
+				--rx_skip;
+			} else {
+				if (rx) {
+					*rx++ = rxbyte;
+				}
+				--rx_count;
+			}
+		}
+
+		if (!did_something && __builtin_expect(flash_was_aborted(), 0)) {
+			break;
+		}
+	}
+	flash_cs_force(OUTOVER_HIGH);
+}
+#endif
+
+static inline void flash_wait_ready(uint cs)
+{
+	uint8_t status_reg;
+#if PICO_RP2040
+	__unused uint ignore = cs;
+#endif
+
+	do {
+#if PICO_RP2350
+		qmi_hw->direct_tx = FLASHCMD_READ_STATUS | QMI_DIRECT_TX_NOPUSH_BITS;
+		cs = flash_put_get(cs, NULL, &status_reg, 1);
+#else
+		flash_cs_force(OUTOVER_LOW);
+		ssi_hw->dr0 = FLASHCMD_READ_STATUS;
+		flash_put_get(NULL, &status_reg, 1, 1);
+#endif
+	} while (status_reg & 0x1 && !flash_was_aborted());
+}
+
+static inline void flash_enable_write(uint cs)
+{
+#if PICO_RP2350
+	qmi_hw->direct_tx = FLASHCMD_WRITE_ENABLE | QMI_DIRECT_TX_NOPUSH_BITS;
+	flash_put_get(cs, NULL, NULL, 0);
+#else
+	__unused uint ignore = cs;
+	flash_cs_force(OUTOVER_LOW);
+	ssi_hw->dr0 = FLASHCMD_WRITE_ENABLE;
+	flash_put_get(NULL, NULL, 0, 1);
+#endif
+}
+
+static inline void flash_put_cmd_addr(uint8_t cmd, uint32_t addr)
+{
+#if PICO_RP2350
+	addr = __builtin_bswap32(addr & ((1u << 24) - 1));
+	addr |= cmd;
+	qmi_hw->direct_tx =
+		((addr << 16) >> 16) | QMI_DIRECT_TX_NOPUSH_BITS | QMI_DIRECT_TX_DWIDTH_BITS;
+	qmi_hw->direct_tx = (addr >> 16) | QMI_DIRECT_TX_NOPUSH_BITS | QMI_DIRECT_TX_DWIDTH_BITS;
+#else
+	flash_cs_force(OUTOVER_LOW);
+	addr |= cmd << 24;
+	for (int i = 0; i < 4; ++i) {
+		ssi_hw->dr0 = addr >> 24;
+		addr <<= 8;
+	}
+#endif
+}
+
+void __no_inline_not_in_flash_func(flash_write_partial_internal)(uint32_t addr, const uint8_t *data, size_t size)
+{
+	uint cs = (addr >> 24) & 0x1u;
+
+	flash_enable_write(cs);
+	flash_put_cmd_addr(FLASHCMD_PAGE_PROGRAM, addr);
+#if PICO_RP2350
+	flash_put_get(cs, data, NULL, size);
+#else
+	flash_put_get(data, NULL, size, 4);
+#endif
+	flash_wait_ready(cs);
+}
