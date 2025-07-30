@@ -77,11 +77,11 @@
 #define __RISCV_PMP_CHECKED 1
 
 #ifndef FPGA_CLK_SYS_HZ
-#define FPGA_CLK_SYS_HZ (48 * MHZ)
+#define FPGA_CLK_SYS_HZ (48 * PICO_MHZ)
 #endif
 
 #ifndef FPGA_CLK_REF_HZ
-#define FPGA_CLK_REF_HZ (12 * MHZ)
+#define FPGA_CLK_REF_HZ (12 * PICO_MHZ)
 #endif
 
 // PICO_CONFIG: XOSC_HZ, Crystal oscillator frequency in Hz, type=int, default=12000000, advanced=true, group=hardware_base
