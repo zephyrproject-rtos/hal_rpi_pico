@@ -358,7 +358,7 @@ static int issue_2118_test(void) {
 #if PICO_ON_DEVICE
     // this problem only happens when running the clock fast as it requires the time between
     // alarm_pool_irq_handler handling an alarm and setting the next alarm to be <1us
-    set_sys_clock_hz(200 * MHZ, true);
+    set_sys_clock_hz(200 * PICO_MHZ, true);
     setup_default_uart();
 #endif
 
