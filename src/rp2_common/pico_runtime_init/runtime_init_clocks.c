@@ -10,6 +10,8 @@
 #include "hardware/clocks.h"
 #include "hardware/pll.h"
 #include "hardware/ticks.h"
+#include "hardware/timer.h"
+#include "hardware/vreg.h"
 #include "hardware/xosc.h"
 #if PICO_RP2040
 #include "hardware/regs/rtc.h"
@@ -39,10 +41,10 @@ void __weak runtime_init_clocks(void) {
     // Note: These need setting *before* the ticks are started
     if (running_on_fpga()) {
         for (uint i = 0; i < CLK_COUNT; i++) {
-            clock_set_reported_hz(i, 48 * PICO_MHZ);
+            clock_set_reported_hz(i, FPGA_CLK_SYS_HZ);
         }
         // clk_ref is 12MHz in both RP2040 and RP2350 FPGA
-        clock_set_reported_hz(clk_ref, 12 * PICO_MHZ);
+        clock_set_reported_hz(clk_ref, FPGA_CLK_REF_HZ);
         // RP2040 has an extra clock, the rtc
 #if HAS_RP2040_RTC
         clock_set_reported_hz(clk_rtc, RTC_CLOCK_FREQ_HZ);
@@ -84,6 +86,15 @@ void __weak runtime_init_clocks(void) {
                         CLOCKS_CLK_REF_CTRL_SRC_VALUE_XOSC_CLKSRC,
                         0,
                         XOSC_HZ);
+
+        // This must be done after we've configured CLK_REF to XOSC due to the need to time a delay
+#if SYS_CLK_VREG_VOLTAGE_AUTO_ADJUST && defined(SYS_CLK_VREG_VOLTAGE_MIN)
+        if (vreg_get_voltage() < SYS_CLK_VREG_VOLTAGE_MIN) {
+            vreg_set_voltage(SYS_CLK_VREG_VOLTAGE_MIN);
+            // wait for voltage to settle; must use CPU cycles as TIMER is not yet clocked correctly
+            busy_wait_at_least_cycles((uint32_t)((SYS_CLK_VREG_VOLTAGE_AUTO_ADJUST_DELAY_US * (uint64_t)XOSC_HZ) / 1000000));
+        }
+#endif
 
         /// \tag::configure_clk_sys[]
         // CLK SYS = PLL SYS (usually) 125MHz / 1 = 125MHz

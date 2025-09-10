@@ -19,13 +19,14 @@ def process_file(input_dir, file):
     results = []
 
     # Check content type
-    content_type, _ = mimetypes.guess_type(file)
+    content_type, content_encoding = mimetypes.guess_type(file)
     if content_type is None:
         content_type = "application/octet-stream"
 
-    # file name
-    data = f"/{file.relative_to(input_dir)}\x00"
-    comment = f"\"/{file.relative_to(input_dir)}\" ({len(data)} chars)"
+    # file name with posix directory separators 
+    file_path_posix = file.relative_to(input_dir).as_posix()
+    data = f"/{file_path_posix}\x00"
+    comment = f"\"/{file_path_posix}\" ({len(data)} chars)"
     while(len(data) % PAYLOAD_ALIGNMENT != 0):
         data += "\x00"
     results.append({'data': bytes(data, "utf-8"), 'comment': comment});
@@ -52,9 +53,15 @@ def process_file(input_dir, file):
         comment = f"\"Content-Length: {file_size}\" ({len(data)} chars)"
         results.append({'data': bytes(data, "utf-8"), 'comment': comment});
 
-    # content type
-    data = f"Content-Type: {content_type}\r\n\r\n"
-    comment = f"\"Content-Type: {content_type}\" ({len(data)} chars)"
+    # content type and content encoding
+    content_type_header = f"Content-Type: {content_type}"
+    if content_encoding is None:
+        data = f"{content_type_header}\r\n\r\n"
+        comment = f"\"{content_type_header}\" ({len(data)} chars)"
+    else:
+        content_encoding_header = f"Content-Encoding: {content_encoding}"
+        data = f"{content_type_header}\r\n{content_encoding_header}\r\n\r\n"
+        comment = f"\"{content_type_header} {content_encoding_header}\" ({len(data)} chars)"
     results.append({'data': bytes(data, "utf-8"), 'comment': comment});
 
     # file contents
@@ -94,7 +101,7 @@ def process_file_list(fd, input):
         fd.write(f"static const unsigned char {data_var}[] = {{\n")
         for entry in results:
             fd.write(f"\n    /* {entry['comment']} */\n")
-            byte_count = 0;
+            byte_count = 0
             for b in entry['data']:
                 if byte_count % 16 == 0:
                     fd.write("    ")

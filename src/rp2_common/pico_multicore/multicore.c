@@ -14,7 +14,7 @@
 #include "hardware/structs/scb.h"
 #endif
 #include "hardware/structs/sio.h"
-#include "hardware/regs/psm.h"
+#include "hardware/structs/psm.h"
 #include "hardware/claim.h"
 
 #if !PICO_RP2040
@@ -23,12 +23,11 @@
 #endif
 #endif
 
-// note that these are not reset by core reset, however for now, I think people resetting cores
-// and then relying on multicore_lockout for that core without re-initializing, is probably
-// something we can live with breaking.
-//
-// whilst we could clear this in core 1 reset path, that doesn't necessarily catch all,
-// and means pulling in this array even if multicore_lockout is not used.
+// Note that there is no automatic way for us to clear these flags when a particular core is reset, and yet
+// we DO ideally want to clear them, as the `multicore_lockout_victim_init()` checks the flag for the current core
+// and is a no-op if set. We DO have a new `multicore_lockout_victim_deinit()` method, which can be called in a pinch after
+// the reset before calling `multicore_lockout_victim_init()` again, so that is good. We will reset the flag
+// for core1 in `multicore_reset_core1()` though as a convenience since most people will use that to reset core 1.
 static bool lockout_victim_initialized[NUM_CORES];
 
 void multicore_fifo_push_blocking(uint32_t data) {
@@ -102,8 +101,13 @@ int core1_wrapper(int (*entry)(void), void *stack_base) {
 void multicore_reset_core1(void) {
     // Use atomic aliases just in case core 1 is also manipulating some PSM state
     io_rw_32 *power_off = (io_rw_32 *) (PSM_BASE + PSM_FRCE_OFF_OFFSET);
+#ifdef __STRICT_ANSI__
+    io_rw_32 *power_off_set = hw_set_alias_untyped(power_off);
+    io_rw_32 *power_off_clr = hw_clear_alias_untyped(power_off);
+#else
     io_rw_32 *power_off_set = hw_set_alias(power_off);
     io_rw_32 *power_off_clr = hw_clear_alias(power_off);
+#endif
 
     // Hard-reset core 1.
     // Reading back confirms the core 1 reset is in the correct state, but also
@@ -117,6 +121,9 @@ void multicore_reset_core1(void) {
     uint irq_num = SIO_FIFO_IRQ_NUM(0);
     bool enabled = pico_irq_is_enabled(irq_num);
     irq_set_enabled(irq_num, false);
+
+    // Core 1 will be in un-initialized state
+    lockout_victim_initialized[1] = false;
 
     // Bring core 1 back out of reset. It will drain its own mailbox FIFO, then push
     // a 0 to our mailbox to tell us it has done this.
@@ -200,25 +207,27 @@ void multicore_launch_core1_raw(void (*entry)(void), uint32_t *sp, uint32_t vect
     irq_set_enabled(irq_num, enabled);
 }
 
-#define LOCKOUT_MAGIC_START 0x73a8831eu
-#define LOCKOUT_MAGIC_END (~LOCKOUT_MAGIC_START)
-
+// A non-zero initialisation value is used in order to reduce the chance of
+// entering the lock handler on bootup due to a 0-word being present in the FIFO
+static volatile uint32_t lockout_request_id = 0x73a8831eu;
 static mutex_t lockout_mutex;
-static bool lockout_in_progress;
 
 // note this method is in RAM because lockout is used when writing to flash
 // it only makes inline calls
 static void __isr __not_in_flash_func(multicore_lockout_handler)(void) {
     multicore_fifo_clear_irq();
     while (multicore_fifo_rvalid()) {
-        if (sio_hw->fifo_rd == LOCKOUT_MAGIC_START) {
+        uint32_t request_id = sio_hw->fifo_rd;
+        if (request_id == lockout_request_id) {
+            // valid lockout request received
             uint32_t save = save_and_disable_interrupts();
-            multicore_fifo_push_blocking_inline(LOCKOUT_MAGIC_START);
-            while (multicore_fifo_pop_blocking_inline() != LOCKOUT_MAGIC_END) {
-                tight_loop_contents(); // not tight but endless potentially
+            multicore_fifo_push_blocking_inline(request_id);
+            // wait for the lockout to expire
+            while (request_id == lockout_request_id) {
+                // when lockout_request_id is updated, the other CPU core calls __sev
+                __wfe();
             }
             restore_interrupts_from_disabled(save);
-            multicore_fifo_push_blocking_inline(LOCKOUT_MAGIC_END);
         }
     }
 }
@@ -243,7 +252,19 @@ void multicore_lockout_victim_init(void) {
     lockout_victim_initialized[core_num] = true;
 }
 
-static bool multicore_lockout_handshake(uint32_t magic, absolute_time_t until) {
+void multicore_lockout_victim_deinit(void) {
+    uint core_num = get_core_num();
+    if (lockout_victim_initialized[core_num]) {
+        // On platforms other than RP2040, these are actually the same IRQ number
+        // (each core only sees its own IRQ, always at the same IRQ number).
+        uint fifo_irq_this_core = SIO_FIFO_IRQ_NUM(core_num);
+        irq_remove_handler(fifo_irq_this_core, multicore_lockout_handler);
+        irq_set_enabled(fifo_irq_this_core, false);
+        lockout_victim_initialized[core_num] = false;
+    }
+}
+
+static bool multicore_lockout_handshake(uint32_t request_id, absolute_time_t until) {
     uint irq_num = SIO_FIFO_IRQ_NUM(get_core_num());
     bool enabled = pico_irq_is_enabled(irq_num);
     if (enabled) irq_set_enabled(irq_num, false);
@@ -253,7 +274,7 @@ static bool multicore_lockout_handshake(uint32_t magic, absolute_time_t until) {
         if (next_timeout_us < 0) {
             break;
         }
-        multicore_fifo_push_timeout_us(magic, (uint64_t)next_timeout_us);
+        multicore_fifo_push_timeout_us(request_id, (uint64_t)next_timeout_us);
         next_timeout_us = absolute_time_diff_us(get_absolute_time(), until);
         if (next_timeout_us < 0) {
             break;
@@ -262,7 +283,7 @@ static bool multicore_lockout_handshake(uint32_t magic, absolute_time_t until) {
         if (!multicore_fifo_pop_timeout_us((uint64_t)next_timeout_us, &word)) {
             break;
         }
-        if (word == magic) {
+        if (word == request_id) {
             rc = true;
         }
     } while (!rc);
@@ -270,14 +291,28 @@ static bool multicore_lockout_handshake(uint32_t magic, absolute_time_t until) {
     return rc;
 }
 
+static uint32_t update_lockout_request_id(void) {
+    // generate new number and then update shared variable
+    uint32_t new_request_id = lockout_request_id + 1;
+    lockout_request_id = new_request_id;
+    // notify other core
+    __sev();
+    return new_request_id;
+}
+
 static bool multicore_lockout_start_block_until(absolute_time_t until) {
     check_lockout_mutex_init();
     if (!mutex_enter_block_until(&lockout_mutex, until)) {
         return false;
     }
-    hard_assert(!lockout_in_progress);
-    bool rc = multicore_lockout_handshake(LOCKOUT_MAGIC_START, until);
-    lockout_in_progress = rc;
+    // generate a new request_id number
+    uint32_t request_id = update_lockout_request_id();
+    // attempt to lock out
+    bool rc = multicore_lockout_handshake(request_id, until);
+    if (!rc) {
+        // lockout failed - cancel it
+        update_lockout_request_id();
+    }
     mutex_exit(&lockout_mutex);
     return rc;
 }
@@ -295,13 +330,10 @@ static bool multicore_lockout_end_block_until(absolute_time_t until) {
     if (!mutex_enter_block_until(&lockout_mutex, until)) {
         return false;
     }
-    assert(lockout_in_progress);
-    bool rc = multicore_lockout_handshake(LOCKOUT_MAGIC_END, until);
-    if (rc) {
-        lockout_in_progress = false;
-    }
+    // lockout finished - cancel it
+    update_lockout_request_id();
     mutex_exit(&lockout_mutex);
-    return rc;
+    return true;
 }
 
 bool multicore_lockout_end_timeout_us(uint64_t timeout_us) {

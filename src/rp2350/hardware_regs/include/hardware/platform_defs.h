@@ -73,6 +73,16 @@
 #define HAS_POWMAN_TIMER 1
 #define HAS_RP2350_TRNG 1
 #define HAS_HSTX 1
+#define HAS_PADS_BANK0_ISOLATION 1
+#define __RISCV_PMP_CHECKED 1
+
+#ifndef FPGA_CLK_SYS_HZ
+#define FPGA_CLK_SYS_HZ (48 * PICO_MHZ)
+#endif
+
+#ifndef FPGA_CLK_REF_HZ
+#define FPGA_CLK_REF_HZ (12 * PICO_MHZ)
+#endif
 
 // PICO_CONFIG: XOSC_HZ, Crystal oscillator frequency in Hz, type=int, default=12000000, advanced=true, group=hardware_base
 // NOTE:  The system and USB clocks are generated from the frequency using two PLLs.
@@ -87,6 +97,11 @@
 #else
 #define XOSC_HZ _u(12000000)
 #endif
+#endif
+
+// PICO_CONFIG: PICO_USE_FASTEST_SUPPORTED_CLOCK, Use the fastest officially supported clock by default, type=bool, default=0, group=hardware_base
+#ifndef PICO_USE_FASTEST_SUPPORTED_CLOCK
+#define PICO_USE_FASTEST_SUPPORTED_CLOCK 0
 #endif
 
 // PICO_CONFIG: SYS_CLK_HZ, System operating frequency in Hz, type=int, default=150000000, advanced=true, group=hardware_base

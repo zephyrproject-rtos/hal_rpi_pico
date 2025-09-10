@@ -101,8 +101,22 @@ bool clock_configure(clock_handle_t clock, uint32_t src, uint32_t auxsrc, uint32
     if (freq > src_freq)
         return false;
 
-    uint32_t div = (uint32_t)((((uint64_t) src_freq) << CLOCKS_CLK_GPOUT0_DIV_INT_LSB) / freq);
-    uint32_t actual_freq = (uint32_t) ((((uint64_t) src_freq) << CLOCKS_CLK_GPOUT0_DIV_INT_LSB) / div);
+    uint64_t div64 =((((uint64_t) src_freq) << CLOCKS_CLK_GPOUT0_DIV_INT_LSB) / freq);
+    uint32_t div, actual_freq;
+    if (div64 >> 32) {
+        // set div to 0 for maximum clock divider
+        div = 0;
+        actual_freq = src_freq >> (32 - CLOCKS_CLK_GPOUT0_DIV_INT_LSB);
+    } else {
+        div = (uint32_t) div64;
+#if PICO_RP2040
+        // on RP2040 only clock divider of 1, or  >= 2 are supported
+        if (div < (2u << CLOCKS_CLK_GPOUT0_DIV_INT_LSB)) {
+            div = (1u << CLOCKS_CLK_GPOUT0_DIV_INT_LSB);
+        }
+#endif
+        actual_freq = (uint32_t) ((((uint64_t) src_freq) << CLOCKS_CLK_GPOUT0_DIV_INT_LSB) / div);
+    }
 
     clock_configure_internal(clock, src, auxsrc, actual_freq, div);
     // Store the configured frequency
@@ -229,21 +243,8 @@ void clocks_enable_resus(resus_callback_t resus_callback) {
 }
 
 void clock_gpio_init_int_frac16(uint gpio, uint src, uint32_t div_int, uint16_t div_frac16) {
-    // Bit messy but it's as much code to loop through a lookup
-    // table. The sources for each gpout generators are the same
-    // so just call with the sources from GP0
-    uint gpclk = 0;
-    if      (gpio == 21) gpclk = clk_gpout0;
-    else if (gpio == 23) gpclk = clk_gpout1;
-    else if (gpio == 24) gpclk = clk_gpout2;
-    else if (gpio == 25) gpclk = clk_gpout3;
-#if !PICO_RP2040
-    else if (gpio == 13) gpclk = clk_gpout0;
-    else if (gpio == 15) gpclk = clk_gpout1;
-#endif
-    else {
-        invalid_params_if(HARDWARE_CLOCKS, true);
-    }
+    // note this includes an invalid_params_if before defaulting to clk_gpout0
+    uint gpclk = gpio_to_gpout_clock_handle(gpio, clk_gpout0);
 
     invalid_params_if(HARDWARE_CLOCKS, div_int >> REG_FIELD_WIDTH(CLOCKS_CLK_GPOUT0_DIV_INT));
     // Set up the gpclk generator
@@ -269,12 +270,12 @@ static const uint8_t gpin0_src[CLK_COUNT] = {
     CLOCKS_CLK_REF_CTRL_AUXSRC_VALUE_CLKSRC_GPIN0,    // CLK_REF
     CLOCKS_CLK_SYS_CTRL_AUXSRC_VALUE_CLKSRC_GPIN0,    // CLK_SYS
     CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLKSRC_GPIN0,   // CLK_PERI
-#if !PICO_RP2040
+#if HAS_HSTX
     CLOCKS_CLK_HSTX_CTRL_AUXSRC_VALUE_CLKSRC_GPIN0,   // CLK_HSTX
 #endif
     CLOCKS_CLK_USB_CTRL_AUXSRC_VALUE_CLKSRC_GPIN0,    // CLK_USB
     CLOCKS_CLK_ADC_CTRL_AUXSRC_VALUE_CLKSRC_GPIN0,    // CLK_ADC
-#if PICO_RP2040
+#if HAS_RP2040_RTC
     CLOCKS_CLK_RTC_CTRL_AUXSRC_VALUE_CLKSRC_GPIN0,    // CLK_RTC
 #endif
 };
