@@ -3,6 +3,9 @@
 Need to take care to not break these changes when updating pico-sdk.
 
 ## Patch List:
+  - [#11] pico-sdk: Comment out parts that are not needed in Zephyr
+    - src/rp2_common/pico_sha256/include/pico/sha256.h
+    - src/rp2_common/pico_sha256/sha256.c
   - [#10] pico-sdk: Switch to picolibc
     - src/rp2040/boot_stage2/CMakeLists.txt
     - src/rp2040/boot_stage2/boot_stage2.ld

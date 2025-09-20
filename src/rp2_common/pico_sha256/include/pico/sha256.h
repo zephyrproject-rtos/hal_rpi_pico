@@ -7,8 +7,10 @@
 #ifndef _PICO_SHA256_H
 #define _PICO_SHA256_H
 
+#if !defined(__ZEPHYR__)
 #include "pico/time.h"
 #include "hardware/dma.h"
+#endif
 #include "hardware/sha256.h"
 
 /** \file pico/sha256.h
@@ -54,10 +56,13 @@ typedef struct pico_sha256_state {
         uint32_t word;
         uint8_t bytes[4];
     } cache;
+#if !defined(__ZEPHYR__)
     dma_channel_config config;
+#endif
     size_t total_data_size;
 } pico_sha256_state_t;
 
+#if !defined(__ZEPHYR__)
 /*! \brief Release the internal lock on the SHA-256 hardware
  *  \ingroup pico_sha256
  *
@@ -109,6 +114,7 @@ int pico_sha256_start_blocking_until(pico_sha256_state_t *state, enum sha256_end
 static inline int pico_sha256_start_blocking(pico_sha256_state_t *state, enum sha256_endianness endianness, bool use_dma) {
     return pico_sha256_start_blocking_until(state, endianness, use_dma, at_the_end_of_time);
 }
+#endif
 
 /*! \brief Add byte data to be SHA-256 calculation
  *  \ingroup pico_sha256
@@ -127,6 +133,7 @@ static inline int pico_sha256_start_blocking(pico_sha256_state_t *state, enum sh
  */
 void pico_sha256_update(pico_sha256_state_t *state, const uint8_t *data, size_t data_size_bytes);
 
+#if !defined(__ZEPHYR__)
 /*! \brief Add byte data to be SHA-256 calculation
  *  \ingroup pico_sha256
  *
@@ -152,6 +159,11 @@ void pico_sha256_update_blocking(pico_sha256_state_t *state, const uint8_t *data
  * @param out The SHA-256 checksum
  */
 void pico_sha256_finish(pico_sha256_state_t *state, sha256_result_t *out);
+#endif
+
+#if defined(__ZEPHYR__)
+void pico_sha256_write_padding(pico_sha256_state_t *state);
+#endif
 
 #ifdef __cplusplus
 }
