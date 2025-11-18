@@ -40,13 +40,6 @@ void __no_inline_not_in_flash_func(flash_write_partial_internal)(uint32_t addr, 
 #define FLASHCMD_WRITE_ENABLE 0x06
 #define BOOT2_SIZE_WORDS 64
 
-enum outover {
-	OUTOVER_NORMAL = 0,
-	OUTOVER_INVERT,
-	OUTOVER_LOW,
-	OUTOVER_HIGH
-};
-
 static uint32_t boot2_copyout[BOOT2_SIZE_WORDS];
 static bool boot2_copyout_valid = false;
 
@@ -557,7 +550,7 @@ static void __no_inline_not_in_flash_func(flash_put_get)(const uint8_t *tx, uint
 			break;
 		}
 	}
-	flash_cs_force(OUTOVER_HIGH);
+	flash_cs_force(1);
 }
 #endif
 
@@ -573,7 +566,7 @@ static inline void flash_wait_ready(uint cs)
 		qmi_hw->direct_tx = FLASHCMD_READ_STATUS | QMI_DIRECT_TX_NOPUSH_BITS;
 		cs = flash_put_get(cs, NULL, &status_reg, 1);
 #else
-		flash_cs_force(OUTOVER_LOW);
+		flash_cs_force(0);
 		ssi_hw->dr0 = FLASHCMD_READ_STATUS;
 		flash_put_get(NULL, &status_reg, 1, 1);
 #endif
@@ -587,7 +580,7 @@ static inline void flash_enable_write(uint cs)
 	flash_put_get(cs, NULL, NULL, 0);
 #else
 	__unused uint ignore = cs;
-	flash_cs_force(OUTOVER_LOW);
+	flash_cs_force(0);
 	ssi_hw->dr0 = FLASHCMD_WRITE_ENABLE;
 	flash_put_get(NULL, NULL, 0, 1);
 #endif
@@ -602,7 +595,7 @@ static inline void flash_put_cmd_addr(uint8_t cmd, uint32_t addr)
 		((addr << 16) >> 16) | QMI_DIRECT_TX_NOPUSH_BITS | QMI_DIRECT_TX_DWIDTH_BITS;
 	qmi_hw->direct_tx = (addr >> 16) | QMI_DIRECT_TX_NOPUSH_BITS | QMI_DIRECT_TX_DWIDTH_BITS;
 #else
-	flash_cs_force(OUTOVER_LOW);
+	flash_cs_force(0);
 	addr |= cmd << 24;
 	for (int i = 0; i < 4; ++i) {
 		ssi_hw->dr0 = addr >> 24;
