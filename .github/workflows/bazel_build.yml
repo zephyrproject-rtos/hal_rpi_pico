@@ -18,7 +18,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Get Bazel
-        uses: bazel-contrib/setup-bazel@0.9.0
+        uses: bazel-contrib/setup-bazel@0.16.0
         with:
           # Avoid downloading Bazel every time.
           bazelisk-cache: true
@@ -51,7 +51,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Get Bazel
-        uses: bazel-contrib/setup-bazel@0.9.0
+        uses: bazel-contrib/setup-bazel@0.16.0
         with:
           # Avoid downloading Bazel every time.
           bazelisk-cache: true
