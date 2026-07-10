@@ -114,8 +114,21 @@ if (EXISTS ${PICO_MBEDTLS_PATH}/${MBEDTLS_TEST_PATH})
                 bignum_core.c
                 rsa_alt_helpers.c
                 pk_ecc.c
+                psa_crypto_driver_wrappers_no_static.c
+                psa_crypto_ffdh.c
+                psa_crypto_pake.c
+                psa_util.c
+                sha3.c
             )
         endif()
+
+        # block_cipher.c was only added with v3.6.0. Support versions without it as well
+        if (EXISTS ${PICO_MBEDTLS_PATH}/library/block_cipher.c)
+            list(APPEND src_crypto
+                block_cipher.c
+            )
+        endif()
+
         list(TRANSFORM src_crypto PREPEND ${PICO_MBEDTLS_PATH}/library/)
         set(src_crypto ${src_crypto} PARENT_SCOPE)
     endfunction()
@@ -169,6 +182,9 @@ if (EXISTS ${PICO_MBEDTLS_PATH}/${MBEDTLS_TEST_PATH})
             list(APPEND src_tls
                 ssl_client.c
                 ssl_debug_helpers_generated.c
+                ssl_tls13_client.c
+                ssl_tls13_generic.c
+                ssl_tls13_server.c
                 ssl_tls12_client.c
                 ssl_tls12_server.c
             )

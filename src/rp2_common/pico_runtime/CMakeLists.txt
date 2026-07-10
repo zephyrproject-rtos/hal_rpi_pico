@@ -36,6 +36,7 @@ set(PICO_RUNTIME_LIBRARIES
         pico_crt0
         pico_clib_interface
         pico_stdio
+        pico_thread_local
 )
 
 foreach(LIB IN LISTS PICO_RUNTIME_LIBRARIES)
@@ -70,6 +71,8 @@ endif()
 # PANIC                 - default panic impl which brings in stdio;
 # AUTO_INIT_MUTEX       - auto init mutexes, without this you get no printf mutex either;
 # CRT0_FAR_CALLS        - use blx not bl for calls from crt0 to user overridable functions;
+# THREAD_LOCAL          - support for thread locals;
+# MULTICORE_LOCKOUT_BEFORE_CORE1_STARTED - allow multicore_lockout_start to be called on core 0 before core 1 is started
 #
 # \param\ INCLUDE The items to include
 # \param\ EXCLUDE The items to exclude
@@ -81,7 +84,10 @@ function(pico_minimize_runtime TARGET)
             DOUBLE
             FPGA_CHECK
             PANIC
-            AUTO_INIT_MUTEX)
+            AUTO_INIT_MUTEX
+            CRT0_FAR_CALLS
+            THREAD_LOCAL
+            MULTICORE_LOCKOUT_BEFORE_CORE1_STARTED)
     cmake_parse_arguments(RUNTIME "" ""
             "INCLUDE;EXCLUDE" ${ARGN} )
     foreach (INCL_EXCL IN ITEMS INCLUDE EXCLUDE)
@@ -111,6 +117,9 @@ function(pico_minimize_runtime TARGET)
     endif()
     if (NOT RUNTIME_INCLUDE_AUTO_INIT_MUTEX)
         target_compile_definitions(${TARGET} PRIVATE PICO_RUNTIME_SKIP_INIT_MUTEX=1)
+    endif()
+    if (NOT RUNTIME_INCLUDE_THREAD_LOCAL)
+        pico_set_thread_local_implementation(${TARGET} none)
     endif()
 
     if (RUNTIME_INCLUDE_PRINTF)
@@ -150,7 +159,10 @@ function(pico_minimize_runtime TARGET)
     if (NOT RUNTIME_INCLUDE_FPGA_CHECK)
         target_compile_definitions(${TARGET} PRIVATE PICO_NO_FPGA_CHECK=1)
     endif()
-    if (NOT RUNTIME_CRT0_FAR_CALLS)
+    if (NOT RUNTIME_INCLUDE_CRT0_FAR_CALLS)
         target_compile_definitions(${TARGET} PRIVATE PICO_CRT0_NEAR_CALLS=1)
+    endif()
+    if (NOT RUNTIME_INCLUDE_MULTICORE_LOCKOUT_BEFORE_CORE1_STARTED)
+        target_compile_definitions(${TARGET} PRIVATE PICO_MULTICORE_LOCKOUT_BEFORE_CORE1_STARTED=0)
     endif()
 endfunction()

@@ -112,8 +112,13 @@ alarm_pool_t *alarm_pool_create_on_timer(alarm_pool_timer_t *timer, uint hardwar
     alarm_pool_t *pool = (alarm_pool_t *) malloc(sizeof(alarm_pool_t));
     if (pool) {
         pool->entries = (alarm_pool_entry_t *) calloc(max_timers, sizeof(alarm_pool_entry_t));
-        ta_hardware_alarm_claim(timer, hardware_alarm_num);
-        alarm_pool_post_alloc_init(pool, timer, hardware_alarm_num, max_timers);
+        if (pool->entries) {
+            ta_hardware_alarm_claim(timer, hardware_alarm_num);
+            alarm_pool_post_alloc_init(pool, timer, hardware_alarm_num, max_timers);
+        } else {
+            free(pool);
+            pool = NULL;
+        }
     }
     return pool;
 }
@@ -122,7 +127,12 @@ alarm_pool_t *alarm_pool_create_on_timer_with_unused_hardware_alarm(alarm_pool_t
     alarm_pool_t *pool = (alarm_pool_t *) malloc(sizeof(alarm_pool_t));
     if (pool) {
         pool->entries = (alarm_pool_entry_t *) calloc(max_timers, sizeof(alarm_pool_entry_t));
-        alarm_pool_post_alloc_init(pool, timer, (uint) ta_hardware_alarm_claim_unused(timer, true), max_timers);
+        if (pool->entries) {
+            alarm_pool_post_alloc_init(pool, timer, (uint) ta_hardware_alarm_claim_unused(timer, true), max_timers);
+        } else {
+            free(pool);
+            pool = NULL;
+        }
     }
     return pool;
 }
@@ -466,7 +476,8 @@ bool best_effort_wfe_or_timeout(absolute_time_t timeout_timestamp) {
         //
         // Note also, that the use of software spin locks on RP2350 to access state would always cause a SEV
         // due to use of LDREX etc., so actually using spin locks to protect the state would be worse.
-        if (ta_wakes_up_on_or_before(alarm_pool_get_default()->timer, alarm_pool_get_default()->timer_alarm_num,
+        static uint64_t last_added = INT64_MAX; // initialised to at_the_end_of_time (INT64_MAX), in case the first call has timeout_timestamp 0
+        if (last_added == to_us_since_boot(timeout_timestamp) || ta_wakes_up_on_or_before(alarm_pool_get_default()->timer, alarm_pool_get_default()->timer_alarm_num,
                                      (int64_t)to_us_since_boot(timeout_timestamp))) {
             // we already are waking up at or before when we want to (possibly due to us having been called
             // before in a loop), so we can do an actual WFE. Note we rely on the fact that the alarm pool IRQ
@@ -479,6 +490,7 @@ bool best_effort_wfe_or_timeout(absolute_time_t timeout_timestamp) {
                 tight_loop_contents();
                 return time_reached(timeout_timestamp);
             } else {
+                last_added = to_us_since_boot(timeout_timestamp);
                 if (!time_reached(timeout_timestamp)) {
                     // ^ at the point above the timer hadn't fired, so it is safe
                     // to wait; the event will happen due to IRQ at some point between
