@@ -43,6 +43,11 @@
 #define PARAM_ASSERTIONS_ENABLED_LOCK_CORE 0
 #endif
 
+// PICO_CONFIG: PICO_SYNC_RP2350_SPIN_LOCK_WORKAROUND, Enable workaround to preserve low power waits in synchronization primitives on RP2350 when using software spin locks, type=bool, default=1 on RP2350 when using software spin locks, advanced=true, group=pico_sync
+#ifndef PICO_SYNC_RP2350_SPIN_LOCK_WORKAROUND
+#define PICO_SYNC_RP2350_SPIN_LOCK_WORKAROUND PICO_SPIN_LOCK_UNLOCK_CAUSES_SEV
+#endif
+
 /** \file lock_core.h
  *  \ingroup lock_core
  *
@@ -50,9 +55,15 @@
  * access to the remaining lock state (in primitives using lock_core); it is never left locked outside
  * of the function implementations
  */
+
+/*! \brief Core state shared by all lock primitives
+ *  \ingroup lock_core
+ *
+ * Contains the spin lock used to protect the internal state of a locking primitive.
+ * The spin lock is released before any function returns; it is never held on exit.
+ */
 struct lock_core {
-    // spin lock protecting this lock's state
-    spin_lock_t *spin_lock;
+    spin_lock_t *spin_lock; ///< Spin lock protecting this lock's state
 
     // note any lock members in containing structures need not be volatile;
     // they are protected by memory/compiler barriers when gaining and release spin locks
@@ -125,7 +136,17 @@ void lock_init(lock_core_t *core, uint lock_num);
  * \param save the uint32_t value that should be passed to spin_unlock when the spin lock is unlocked. (i.e. the `PRIMASK`
  *             state when the spin lock was acquire
  */
+#if !PICO_SYNC_RP2350_SPIN_LOCK_WORKAROUND
 #define lock_internal_spin_unlock_with_wait(lock, save) spin_unlock((lock)->spin_lock, save), __wfe()
+#else
+extern volatile uint8_t lock_internal_notify_count;
+#define lock_internal_spin_unlock_with_wait(lock, save) ({    \
+    uint8_t _notify_count = lock_internal_notify_count;       \
+    spin_unlock((lock)->spin_lock, save);                     \
+    if (_notify_count == lock_internal_notify_count) __wfe(); \
+    __wfe();                                                  \
+    })
+#endif
 #endif
 
 #ifndef lock_internal_spin_unlock_with_notify
@@ -148,7 +169,16 @@ void lock_init(lock_core_t *core, uint lock_num);
  * \param save the uint32_t value that should be passed to spin_unlock when the spin lock is unlocked. (i.e. the PRIMASK
  *             state when the spin lock was acquire)
  */
+#if !PICO_SYNC_RP2350_SPIN_LOCK_WORKAROUND
 #define lock_internal_spin_unlock_with_notify(lock, save) spin_unlock((lock)->spin_lock, save), __sev()
+#else
+// note that spin_unlock already causes a SEV
+#define lock_internal_spin_unlock_with_notify(lock, save) ({ \
+    lock_internal_notify_count++;                            \
+    spin_unlock((lock)->spin_lock, save);                    \
+    __sev();                                                 \
+    })
+#endif
 #endif
 
 #ifndef lock_internal_spin_unlock_with_best_effort_wait_or_timeout
@@ -174,10 +204,19 @@ void lock_init(lock_core_t *core, uint lock_num);
  * \param until the \ref absolute_time_t value
  * \return true if the timeout has been reached
  */
+#if !PICO_SYNC_RP2350_SPIN_LOCK_WORKAROUND
 #define lock_internal_spin_unlock_with_best_effort_wait_or_timeout(lock, save, until) ({ \
     spin_unlock((lock)->spin_lock, save);                                                \
     best_effort_wfe_or_timeout(until);                                                   \
 })
+#else
+#define lock_internal_spin_unlock_with_best_effort_wait_or_timeout(lock, save, until) ({ \
+    uint8_t _notify_count = lock_internal_notify_count;                                  \
+    spin_unlock((lock)->spin_lock, save);                                                \
+    if (_notify_count == lock_internal_notify_count) __wfe();                            \
+    best_effort_wfe_or_timeout(until);                                                   \
+})
+#endif
 #endif
 
 #ifndef sync_internal_yield_until_before

@@ -113,6 +113,27 @@ void irq_set_mask_n_enabled(uint n, uint32_t mask, bool enabled) {
     irq_set_mask_n_enabled_internal(n, mask, enabled);
 }
 
+static inline uint32_t irq_get_mask_n_internal(uint n) {
+    invalid_params_if(HARDWARE_IRQ, n * 32u >= ((PICO_NUM_VTABLE_IRQS + 31u) & ~31u));
+#if defined(__riscv)
+    return (hazard3_irqarray_read(RVCSR_MEIEA_OFFSET, 2 * n) & 0xffffu) | (hazard3_irqarray_read(RVCSR_MEIEA_OFFSET, 2 * n + 1) << 16);
+#elif PICO_RP2040
+    ((void)n);
+    return nvic_hw->iser;
+#else
+    // >32 IRQs
+    return nvic_hw->iser[n];
+#endif
+}
+
+uint32_t irq_get_mask(void) {
+    return irq_get_mask_n_internal(0);
+}
+
+uint32_t irq_get_mask_n(uint n) {
+    return irq_get_mask_n_internal(n);
+}
+
 void irq_set_pending(uint num) {
     check_irq_param(num);
 #ifdef __riscv
@@ -127,6 +148,15 @@ void irq_set_pending(uint num) {
 #endif
 #endif
 }
+
+#if !PICO_NO_RAM_VECTOR_TABLE
+static void set_raw_irq_handler_and_unlock(uint num, irq_handler_t handler, uint32_t save) {
+    // update vtable (vtable_handler may be same or updated depending on cases, but we do it anyway for compactness)
+    get_vtable()[VTABLE_FIRST_IRQ + num] = handler;
+    __dmb();
+    spin_unlock(spin_lock_instance(PICO_SPINLOCK_ID_IRQ), save);
+}
+#endif
 
 #if !PICO_DISABLE_SHARED_IRQ_HANDLERS && !PICO_NO_RAM_VECTOR_TABLE
 // limited by 8 bit relative links (and reality)
@@ -200,13 +230,6 @@ bool irq_has_shared_handler(uint irq_num) {
     check_irq_param(irq_num);
     irq_handler_t handler = irq_get_vtable_handler(irq_num);
     return is_shared_irq_raw_handler(handler);
-}
-
-static void set_raw_irq_handler_and_unlock(uint num, irq_handler_t handler, uint32_t save) {
-    // update vtable (vtable_handler may be same or updated depending on cases, but we do it anyway for compactness)
-    get_vtable()[VTABLE_FIRST_IRQ + num] = handler;
-    __dmb();
-    spin_unlock(spin_lock_instance(PICO_SPINLOCK_ID_IRQ), save);
 }
 
 #else // PICO_DISABLE_SHARED_IRQ_HANDLERS && PICO_NO_RAM_VECTOR_TABLE
