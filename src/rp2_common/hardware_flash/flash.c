@@ -575,7 +575,7 @@ static void __no_inline_not_in_flash_func(flash_put_get)(uint cs, const uint8_t 
 }
 #endif
 
-static inline void flash_wait_ready(uint cs)
+static inline void __not_in_flash_func(flash_wait_ready)(uint cs)
 {
 	uint8_t status_reg;
 #if PICO_RP2040
@@ -594,7 +594,7 @@ static inline void flash_wait_ready(uint cs)
 	} while (status_reg & 0x1 && !flash_was_aborted());
 }
 
-static inline void flash_enable_write(uint cs)
+static inline void __not_in_flash_func(flash_enable_write)(uint cs)
 {
 #if PICO_RP2350
 	qmi_hw->direct_tx = FLASHCMD_WRITE_ENABLE | QMI_DIRECT_TX_NOPUSH_BITS;
@@ -607,7 +607,7 @@ static inline void flash_enable_write(uint cs)
 #endif
 }
 
-static inline void flash_put_cmd_addr(uint cs, uint8_t cmd, uint32_t addr)
+static inline void __not_in_flash_func(flash_put_cmd_addr)(uint cs, uint8_t cmd, uint32_t addr)
 {
 #if PICO_RP2350
 	addr = __builtin_bswap32(addr & ((1u << 24) - 1));
