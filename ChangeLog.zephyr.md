@@ -3,6 +3,13 @@
 Need to take care to not break these changes when updating pico-sdk.
 
 ## Patch List:
+  - [#12] pico-sdk: lib/cyw43-driver updated to version 2.0.0
+    - lib/cyw43-driver
+    - MODULE.bazel
+    - src/rp2_common/pico_cyw43_driver/CMakeLists.txt
+    - src/rp2_common/pico_cyw43_driver/cyw43_firmware.py
+    - src/rp2_common/pico_cyw43_driver/include/cyw43_partition_firmware.h
+    - src/rp2_common/pico_cyw43_driver/wifi_firmware.S
   - [#11] pico-sdk: Comment out parts that are not needed in Zephyr
     - src/rp2_common/pico_sha256/include/pico/sha256.h
     - src/rp2_common/pico_sha256/sha256.c
